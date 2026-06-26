@@ -1,6 +1,7 @@
 # Visual Studio Code
 .vscode
 .vscode/*
+.understand-anything
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
