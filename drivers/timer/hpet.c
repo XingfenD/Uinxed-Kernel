@@ -8,12 +8,12 @@
  *
  */
 
-#include <acpi.h>
-#include <hhdm.h>
-#include <idt.h>
-#include <printk.h>
-#include <stdint.h>
-#include <tsc.h>
+#include <arch/idt.h>
+#include <drivers/acpi.h>
+#include <drivers/tsc.h>
+#include <kernel/printk.h>
+#include <libs/std/stdint.h>
+#include <mem/hhdm.h>
 
 hpet_info_t    *hpet_addr;
 static uint32_t hpet_period = 0;
@@ -29,7 +29,9 @@ uint64_t nano_time(void)
 
 /* Get the HPET structure */
 hpet_info_t *get_acpi_hpet(void)
-{ return hpet_addr; }
+{
+    return hpet_addr;
+}
 
 /* Initialize high-precision event timer */
 void hpet_init(hpet_t *hpet)

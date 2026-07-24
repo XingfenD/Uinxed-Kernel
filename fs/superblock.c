@@ -8,10 +8,10 @@
  *
  */
 
-#include <errno.h>
-#include <blockdev.h>
-#include <heap.h>
-#include <superblock.h>
+#include <drivers/blockdev.h>
+#include <fs/superblock.h>
+#include <kernel/errno.h>
+#include <mem/heap.h>
 
 int superblock_valid(const superblock_disk_t *sb)
 {
@@ -34,10 +34,10 @@ int superblock_valid(const superblock_disk_t *sb)
 int superblock_read(uint8_t drive, superblock_disk_t *sb)
 {
     blockdev_device_t device;
-    int status;
+    int               status;
 
     if (!sb) return -EINVAL;
-    status = blockdev_open_ide(drive, &device);
+    status = blockdev_open_drive(drive, &device);
     if (status != EOK) return status;
 
     status = blockdev_read_bytes(&device, (uint64_t)SUPERBLOCK_SECTOR * SUPERBLOCK_BLOCK_SECTOR, sb, sizeof(*sb));
@@ -52,7 +52,7 @@ int superblock_write(uint8_t drive, const superblock_disk_t *sb)
 
     if (!sb) return -EINVAL;
     if (superblock_valid(sb) != EOK) return -EINVAL;
-    status = blockdev_open_ide(drive, &device);
+    status = blockdev_open_drive(drive, &device);
     if (status != EOK) return status;
 
     return blockdev_write_bytes(&device, (uint64_t)SUPERBLOCK_SECTOR * SUPERBLOCK_BLOCK_SECTOR, sb, sizeof(*sb));

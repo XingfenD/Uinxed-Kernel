@@ -8,8 +8,8 @@
  *
  */
 
-#include <cpuid.h>
-#include <stdint.h>
+#include <arch/cpuid.h>
+#include <libs/std/stdint.h>
 
 /* Initialize the FPU, including MMX (if any) */
 void init_fpu(void)
@@ -51,10 +51,12 @@ void init_sse(void)
 void init_avx(void)
 {
 #if CPU_FEATURE_AVX
-    if (!cpu_support_avx()) return;
+    if (!cpu_support_avx() || !cpu_support_xsave()) return;
 
     uint64_t cr4;
-    uint64_t xcr0 = 0xE7;
+    uint64_t xcr0 = 0x7;
+    if (!cpu_xcr0_supports(xcr0)) return;
+
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4)::"memory");
 
     cr4 |= (1UL << 18); // OSXSAVE = 1

@@ -8,11 +8,11 @@
  *
  */
 
-#include <errno.h>
-#include <heap.h>
-#include <printk.h>
-#include <string.h>
-#include <tmpfs.h>
+#include <fs/tmpfs.h>
+#include <kernel/errno.h>
+#include <kernel/printk.h>
+#include <libs/std/string.h>
+#include <mem/heap.h>
 
 int tmpfs_id = 0;
 
@@ -59,11 +59,15 @@ int tmpfs_mk(void *parent, const char *name, vfs_node_t node, int is_dir)
 
 /* Create a directory in tmpfs */
 int tmpfs_mkdir(void *parent, const char *name, vfs_node_t node)
-{ return tmpfs_mk(parent, name, node, 1); }
+{
+    return tmpfs_mk(parent, name, node, 1);
+}
 
 /* Create a regular file in tmpfs */
 int tmpfs_mkfile(void *parent, const char *name, vfs_node_t node)
-{ return tmpfs_mk(parent, name, node, 0); }
+{
+    return tmpfs_mk(parent, name, node, 0);
+}
 
 /* Read data from a tmpfs regular file */
 size_t tmpfs_read(void *file, void *addr, size_t offset, size_t size)
@@ -209,27 +213,72 @@ int tmpfs_free(void *handle)
 
 /* Dummy function (placeholder for VFS callbacks not implemented) */
 void tmpfs_dummy(void)
-{ /* Nothing */ }
+{ /* Nothing */
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-open-instance callbacks — delegate to device ops               */
+/* ------------------------------------------------------------------ */
+
+static int tmpfs_file_open(vfs_node_t node, uint64_t flags, void **private_data)
+{
+    tmpfs_file_t *f = node->handle;
+
+    if (!f) return -EINVAL;
+    if (f->device.open) return f->device.open(node, flags, private_data);
+    *private_data = NULL;
+    return 0;
+}
+
+static void tmpfs_file_release(vfs_node_t node, void *private_data)
+{
+    tmpfs_file_t *f = node->handle;
+
+    if (!f) return;
+    if (f->device.release) f->device.release(node, private_data);
+}
+
+static void *tmpfs_file_mmap(vfs_node_t node, void *private_data,
+                             size_t offset, size_t size, int flags,
+                             struct vm_area *vma)
+{
+    tmpfs_file_t *f = node->handle;
+
+    (void)private_data;
+    (void)vma;
+    if (!f) return NULL;
+    if (f->device.mmap)
+        return f->device.mmap(f->device.ctx, private_data,
+                              offset, size, flags, vma);
+
+    /* Regular tmpfs file: return the data buffer directly. */
+    if (f->data && offset < f->size)
+        return f->data + offset;
+    return NULL;
+}
 
 static struct vfs_callback tmpfs_callbacks = {
-    .mount    = tmpfs_mount,
-    .unmount  = tmpfs_umount,
-    .open     = (vfs_open_t)tmpfs_dummy,
-    .close    = (vfs_close_t)tmpfs_dummy,
-    .read     = tmpfs_read,
-    .write    = tmpfs_write,
-    .readlink = (vfs_readlink_t)tmpfs_dummy,
-    .mkdir    = tmpfs_mkdir,
-    .mkfile   = tmpfs_mkfile,
-    .link     = (vfs_mk_t)tmpfs_dummy,
-    .symlink  = tmpfs_symlink,
-    .stat     = tmpfs_stat,
-    .ioctl    = tmpfs_ioctl,
-    .dup      = tmpfs_dup,
-    .poll     = tmpfs_poll,
-    .free     = tmpfs_free,
-    .delete   = tmpfs_delete,
-    .rename   = tmpfs_rename,
+    .mount        = tmpfs_mount,
+    .unmount      = tmpfs_umount,
+    .open         = (vfs_open_t)tmpfs_dummy,
+    .close        = (vfs_close_t)tmpfs_dummy,
+    .read         = tmpfs_read,
+    .write        = tmpfs_write,
+    .readlink     = (vfs_readlink_t)tmpfs_dummy,
+    .mkdir        = tmpfs_mkdir,
+    .mkfile       = tmpfs_mkfile,
+    .link         = (vfs_mk_t)tmpfs_dummy,
+    .symlink      = tmpfs_symlink,
+    .stat         = tmpfs_stat,
+    .ioctl        = tmpfs_ioctl,
+    .dup          = tmpfs_dup,
+    .poll         = tmpfs_poll,
+    .free         = tmpfs_free,
+    .delete       = tmpfs_delete,
+    .rename       = tmpfs_rename,
+    .file_open    = tmpfs_file_open,
+    .file_release = tmpfs_file_release,
+    .file_mmap    = tmpfs_file_mmap,
 };
 
 /* Register tmpfs with the VFS layer (initialize tmpfs) */

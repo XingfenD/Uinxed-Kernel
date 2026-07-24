@@ -8,14 +8,14 @@
  *
  */
 
-#include <cpio.h>
-#include <errno.h>
-#include <heap.h>
-#include <limine_module.h>
-#include <printk.h>
-#include <stdlib.h>
-#include <string.h>
-#include <vfs.h>
+#include <boot/limine_module.h>
+#include <fs/cpio.h>
+#include <fs/vfs.h>
+#include <kernel/errno.h>
+#include <kernel/printk.h>
+#include <libs/std/stdlib.h>
+#include <libs/std/string.h>
+#include <mem/heap.h>
 
 /* Determine the compression type of the data */
 compression_type_t get_compression_type(const void *data, size_t size)
@@ -74,17 +74,23 @@ void init_cpio(void)
     size_t             file_num_all = 0;
 
     while (1) {
+        if (offset + sizeof(hdr) > init_ramfs->size) break;
         memcpy(&hdr, data_d + offset, sizeof(hdr));
         offset += sizeof(hdr);
 
         size_t namesize = read_num(hdr.c_namesize, 8);
-        char   filename[namesize + 1];
-        filename[0] = '/';
-        memcpy(filename + 1, data_d + offset, namesize);
-        offset = (offset + namesize + 3) & ~3;
+        if (namesize > 4096 || offset + namesize > init_ramfs->size) break;
+        char filename[4096];
+        filename[0]    = '/';
+        size_t copy_ns = namesize < sizeof(filename) - 1 ? namesize : sizeof(filename) - 1;
+        memcpy(filename + 1, data_d + offset, copy_ns);
+        filename[copy_ns + 1] = '\0';
+        offset                = (offset + namesize + 3) & ~3;
 
         size_t filesize = read_num(hdr.c_filesize, 8);
-        char  *filedata = malloc(filesize);
+        if (filesize > init_ramfs->size || offset + filesize > init_ramfs->size) break;
+        char *filedata = malloc(filesize);
+        if (!filedata) break;
         memcpy(filedata, data_d + offset, filesize);
         offset = (offset + filesize + 3) & ~3;
 
@@ -109,7 +115,7 @@ void init_cpio(void)
                 return;
             }
         } else if ((mode & 0120000) == 0120000) {
-            char        *symlink_path = calloc(1, filesize + 1);
+            char *symlink_path = calloc(1, filesize + 1);
 
             strncpy(symlink_path, filedata, filesize);
             status = vfs_symlink(filename, symlink_path);

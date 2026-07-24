@@ -8,24 +8,33 @@
  *
  */
 
-#include <common.h>
-#include <fbcon.h>
-#include <heap.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <video.h>
-#include <gfx_proc.h>
+#include <chipset/common.h>
+#include <libs/gfxs/gfx_proc.h>
+#include <libs/std/stddef.h>
+#include <libs/std/stdint.h>
+#include <libs/std/string.h>
+#include <mem/heap.h>
+#include <video/fbcon.h>
+#include <video/klogo.h>
+#include <video/video.h>
 
 /* Bitmap fonts */
 extern uint8_t ascii_font[];
 
-static char     char_buffer[256];      // Char buffer
-static uint32_t char_buffer_index = 0; // Char buffer index
-static char    *text_grid         = 0;
-static uint32_t *color_grid       = 0;
-static uint32_t *dirty_first_col  = 0;
-static uint32_t *dirty_last_col   = 0;
+static char      char_buffer[256];      // Char buffer
+static uint32_t  char_buffer_index = 0; // Char buffer index
+static char     *text_grid         = 0;
+static uint32_t *color_grid        = 0;
+static uint32_t *dirty_first_col   = 0;
+static uint32_t *dirty_last_col    = 0;
+static uint8_t   full_redraw_pending;
+static uint8_t   redraw_deferred;
+
+#if BOOT_LOGO
+static uint32_t fbcon_offset_x      = 0;
+static uint32_t fbcon_offset_y      = 98;
+static uint32_t fbcon_draw_offset_y = 12;
+#endif
 
 static void fbcon_mark_cell_dirty(uint32_t row, uint32_t col)
 {
@@ -65,14 +74,41 @@ static void fbcon_flush_dirty_rows(void)
     }
 }
 
-static void fbcon_scroll_pixels(void)
+static void fbcon_redraw_screen(void)
 {
-    uint8_t       *dest  = (uint8_t *)buffer;
-    const uint8_t *src   = (const uint8_t *)(buffer + stride * font_height);
-    size_t         count = stride * (height - font_height) * sizeof(uint32_t);
+    if (!text_grid || !color_grid) return;
 
-    memmove(dest, src, count);
-    video_draw_rect((position_t) {0, height - font_height}, (position_t) {stride - 1, height - 1}, back_color);
+    for (uint32_t row = 0; row < c_height; row++) {
+        fbcon_redraw_row_range(row, 0, c_width ? c_width - 1 : 0);
+        if (dirty_first_col && dirty_last_col) {
+            dirty_first_col[row] = c_width;
+            dirty_last_col[row]  = 0;
+        }
+    }
+}
+
+static void fbcon_clear_uncovered_bottom(void)
+{
+#if BOOT_LOGO
+    uint32_t used_height = fbcon_offset_y + fbcon_draw_offset_y + c_height * font_height;
+#else
+    uint32_t used_height = c_height * font_height;
+#endif
+    if (used_height < height) video_draw_rect((position_t) {0, used_height}, (position_t) {stride - 1, height - 1}, back_color);
+}
+
+static void fbcon_flush_screen_updates(void)
+{
+    if (redraw_deferred) return;
+
+    if (full_redraw_pending) {
+        fbcon_redraw_screen();
+        fbcon_clear_uncovered_bottom();
+        full_redraw_pending = 0;
+        return;
+    }
+
+    fbcon_flush_dirty_rows();
 }
 
 /* Initialize framebuffer console */
@@ -83,14 +119,20 @@ void fbcon_init(void)
     font_height = 16;
 
     cx = cy = 0;
+
+#if BOOT_LOGO
+    c_width  = (width - fbcon_offset_x) / font_width;
+    c_height = (height - fbcon_offset_y) / font_height;
+#else
     c_width  = width / font_width;
     c_height = height / font_height;
+#endif
 
     fore_color = color_to_fb_color((color_t) {0xaa, 0xaa, 0xaa});
     back_color = color_to_fb_color((color_t) {0x00, 0x00, 0x00});
 
-    text_grid  = calloc((size_t)c_width * c_height, sizeof(char));
-    color_grid = malloc((size_t)c_width * c_height * sizeof(uint32_t));
+    text_grid       = calloc((size_t)c_width * c_height, sizeof(char));
+    color_grid      = malloc((size_t)c_width * c_height * sizeof(uint32_t));
     dirty_first_col = malloc((size_t)c_height * sizeof(uint32_t));
     dirty_last_col  = malloc((size_t)c_height * sizeof(uint32_t));
     if (text_grid && color_grid && dirty_first_col && dirty_last_col) {
@@ -101,8 +143,51 @@ void fbcon_init(void)
         }
     }
 
-    char_buffer_index = 0;
-    char_buffer[0]    = '\0';
+    char_buffer_index   = 0;
+    char_buffer[0]      = '\0';
+    full_redraw_pending = 0;
+    redraw_deferred     = 0;
+}
+
+/*
+ * fbcon_resize — reallocate text/color/dirty grids after a framebuffer
+ * switch changes the screen dimensions.  Preserves the font size but
+ * recalculates the character grid.
+ */
+void fbcon_resize(void)
+{
+    free(text_grid);
+    free(color_grid);
+    free(dirty_first_col);
+    free(dirty_last_col);
+
+#if BOOT_LOGO
+    c_width  = (width - fbcon_offset_x) / font_width;
+    c_height = (height - fbcon_offset_y) / font_height;
+#else
+    c_width  = width / font_width;
+    c_height = height / font_height;
+#endif
+
+    text_grid       = calloc((size_t)c_width * c_height, sizeof(char));
+    color_grid      = malloc((size_t)c_width * c_height * sizeof(uint32_t));
+    dirty_first_col = malloc((size_t)c_height * sizeof(uint32_t));
+    dirty_last_col  = malloc((size_t)c_height * sizeof(uint32_t));
+
+    if (text_grid && color_grid && dirty_first_col && dirty_last_col) {
+        for (uint32_t row = 0; row < c_height; row++) {
+            fbcon_clear_row(row);
+            dirty_first_col[row] = c_width;
+            dirty_last_col[row]  = 0;
+        }
+    }
+
+    cx                  = 0;
+    cy                  = 0;
+    char_buffer_index   = 0;
+    char_buffer[0]      = '\0';
+    full_redraw_pending = 0;
+    redraw_deferred     = 0;
 }
 
 /* Scroll to a position that units are characters */
@@ -131,10 +216,13 @@ void fbcon_scroll(void)
                 dirty_last_col[c_height - 1]  = c_width ? c_width - 1 : 0;
             }
             fbcon_clear_row(c_height - 1);
-            fbcon_scroll_pixels();
-            fbcon_redraw_row_range(c_height - 1, 0, c_width ? c_width - 1 : 0);
+            full_redraw_pending = 1;
         } else {
+#if BOOT_LOGO
+            video_draw_rect((position_t) {0, fbcon_offset_y}, (position_t) {stride, height}, back_color);
+#else
             video_draw_rect((position_t) {0, 0}, (position_t) {stride, height}, back_color);
+#endif
         }
         cy = c_height - 1;
     }
@@ -143,8 +231,12 @@ void fbcon_scroll(void)
 /* Draw a character at the specified coordinates on the screen */
 void fbcon_draw_char(const char c, uint32_t x, uint32_t y, uint32_t color)
 {
-    uint8_t *char_font      = ascii_font + (size_t)c * font_height;
+    uint8_t *char_font = ascii_font + (size_t)c * font_height;
+#if BOOT_LOGO
+    uint32_t char_base_addr = (y + fbcon_offset_y + fbcon_draw_offset_y) * stride + (x + fbcon_offset_x);
+#else
     uint32_t char_base_addr = y * stride + x;
+#endif
 
     for (uint32_t row = 0; row < font_height; row++) {
         uint32_t *row_buf  = buffer + char_base_addr + row * stride;
@@ -158,16 +250,16 @@ void fbcon_flush_buffer(uint32_t color)
 {
     if (char_buffer_index > 0) {
         for (uint32_t i = 0; i < char_buffer_index; i++) {
-            char     c              = char_buffer[i];
+            char c = char_buffer[i];
             if (text_grid && color_grid && cx + i < c_width && cy < c_height) {
                 size_t index      = (size_t)cy * c_width + (cx + i);
                 text_grid[index]  = c;
                 color_grid[index] = color;
                 fbcon_mark_cell_dirty(cy, cx + i);
             } else {
-                uint32_t start_x       = cx * font_width;
-                uint32_t start_y       = cy * font_height;
-                uint32_t base_y_stride = start_y * stride;
+                uint32_t start_x        = cx * font_width;
+                uint32_t start_y        = cy * font_height;
+                uint32_t base_y_stride  = start_y * stride;
                 uint32_t char_x         = start_x + i * font_width;
                 uint8_t *char_font      = ascii_font + (size_t)c * font_height;
                 uint32_t char_base_addr = base_y_stride + char_x;
@@ -183,7 +275,7 @@ void fbcon_flush_buffer(uint32_t color)
         char_buffer_index = 0;
         char_buffer[0]    = '\0';
     }
-    fbcon_flush_dirty_rows();
+    fbcon_flush_screen_updates();
 }
 
 /* Print a character at the specified coordinates on the screen */
@@ -193,6 +285,7 @@ void fbcon_put_char(const char c, uint32_t color)
         fbcon_flush_buffer(color);
         cy++;
         cx = 0;
+        if (cy >= c_height) fbcon_scroll();
         return;
     }
     if (c == '\r') {
@@ -219,7 +312,7 @@ void fbcon_put_char(const char c, uint32_t color)
                 color_grid[index] = back_color;
                 fbcon_mark_cell_dirty(cy, cx);
             }
-            fbcon_flush_dirty_rows();
+            fbcon_flush_screen_updates();
         } else if (cy > 0) {
             cy--;
             cx = c_width - 1;
@@ -229,10 +322,11 @@ void fbcon_put_char(const char c, uint32_t color)
                 color_grid[index] = back_color;
                 fbcon_mark_cell_dirty(cy, cx);
             }
-            fbcon_flush_dirty_rows();
+            fbcon_flush_screen_updates();
         }
         return;
     }
+    if (cy >= c_height) fbcon_scroll();
     if (char_buffer_index < 256 - 1) char_buffer[char_buffer_index++] = c;
     if (char_buffer_index >= 256 - 1 || cx + char_buffer_index >= c_width) fbcon_flush_buffer(color);
     if (cx >= c_width) {
@@ -245,13 +339,19 @@ void fbcon_put_char(const char c, uint32_t color)
 /* Print a string at the specified coordinates on the screen */
 void fbcon_put_string(const char *str)
 {
+    redraw_deferred++;
     for (; *str; ++str) fbcon_put_char(*str, fore_color);
     fbcon_flush_buffer(fore_color);
+    redraw_deferred--;
+    fbcon_flush_screen_updates();
 }
 
 /* Print a string with color at the specified coordinates on the screen */
 void fbcon_put_string_color(const char *str, uint32_t color)
 {
+    redraw_deferred++;
     for (; *str; ++str) fbcon_put_char(*str, color);
     fbcon_flush_buffer(color);
+    redraw_deferred--;
+    fbcon_flush_screen_updates();
 }

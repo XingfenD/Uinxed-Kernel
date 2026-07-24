@@ -28,7 +28,69 @@ else
   C_CONFIG += -DKERNEL_LOG=0
 endif
 
-# TTF font support has been removed. Using bitmap fonts only.
+ifeq ($(CONFIG_SCHED_DEBUG_DEMO), y)
+  C_CONFIG += -DSCHED_DEBUG_DEMO=1
+else
+  C_CONFIG += -DSCHED_DEBUG_DEMO=0
+endif
+
+ifeq ($(CONFIG_BOOT_LOGO), y)
+  C_CONFIG += -DBOOT_LOGO=1
+else
+  C_CONFIG += -DBOOT_LOGO=0
+endif
+
+ifeq ($(CONFIG_SYSFS), y)
+  C_CONFIG += -DCONFIG_SYSFS=1
+else
+  C_CONFIG += -DCONFIG_SYSFS=0
+endif
+
+ifeq ($(CONFIG_NETLINK), y)
+  C_CONFIG += -DCONFIG_NETLINK=1
+else
+  C_CONFIG += -DCONFIG_NETLINK=0
+endif
+
+ifeq ($(CONFIG_UEVENT_HELPER), y)
+  C_CONFIG += -DCONFIG_UEVENT_HELPER=1
+else
+  C_CONFIG += -DCONFIG_UEVENT_HELPER=0
+endif
+
+ifeq ($(CONFIG_INPUT_EVDEV), y)
+  C_CONFIG += -DCONFIG_INPUT_EVDEV=1
+else
+  C_CONFIG += -DCONFIG_INPUT_EVDEV=0
+endif
+
+ifneq ($(CONFIG_INPUT_EVDEV_BUFSIZE),)
+  C_CONFIG += -DINPUT_EVDEV_BUFSIZE=$(CONFIG_INPUT_EVDEV_BUFSIZE)
+endif
+
+ifeq ($(CONFIG_DRM), y)
+  C_CONFIG += -DCONFIG_DRM=1
+else
+  C_CONFIG += -DCONFIG_DRM=0
+endif
+
+ifeq ($(CONFIG_VIRTIO), y)
+  C_CONFIG += -DCONFIG_VIRTIO=1
+else
+  C_CONFIG += -DCONFIG_VIRTIO=0
+endif
+
+ifeq ($(CONFIG_VIRTIO_GPU), y)
+  C_CONFIG += -DCONFIG_VIRTIO_GPU=1
+else
+  C_CONFIG += -DCONFIG_VIRTIO_GPU=0
+endif
+
+ifeq ($(CONFIG_SOUND_HDA), y)
+  C_CONFIG += -DCONFIG_SOUND_HDA=1
+else
+  C_CONFIG += -DCONFIG_SOUND_HDA=0
+endif
 
 ifneq ($(CONFIG_CPU_MAX_COUNT),)
   C_CONFIG += -DMAX_CPU_COUNT=$(CONFIG_CPU_MAX_COUNT)
@@ -72,27 +134,42 @@ ifneq ($(CONFIG_SERIAL_STOP_BITS),)
   C_CONFIG += -DSERIAL_STOP_BITS=$(CONFIG_SERIAL_STOP_BITS)
 endif
 
-C_SOURCES  := $(shell find * -name "*.c" -not -path "tools/*")
-C_HEADERS  := $(shell find * -name "*.h")
-OBJS       := $(C_SOURCES:%.c=%.o)
-DEPS       := $(OBJS:%.o=%.d)
-LIBS       := $(wildcard libs/lib*.a)
-PWD        := $(shell pwd)
-HOST_CC    ?= cc
-HOST_CFLAGS := -Wall -Wextra -O2
-QEMU       := qemu-system-x86_64
-QEMU_FLAGS := -machine q35 -bios assets/ovmf-code.fd
+C_SOURCES      := $(shell find * -name "*.c" -not -path "tools/*")
+C_HEADERS      := $(shell find * -name "*.h")
+OBJS           := $(C_SOURCES:%.c=%.o)
+DEPS           := $(OBJS:%.o=%.d)
+LIBS           := $(wildcard libs/lib*.a)
+PWD            := $(shell pwd)
+HOST_CC        ?= $(CC)
+HOST_CFLAGS    := -Wall -Wextra -O2
+QEMU           := qemu-system-x86_64
+QEMU_FLAGS     := -machine q35 -bios assets/ovmf-code.fd -serial stdio
+
+AS             := $(CC)
+ASFLAGS        := -c -m64 -ffreestanding -nostdlib -fno-omit-frame-pointer -I include
+INIT_ELF       := assets/Limine/init
+
+# Automatically find all C source files in tools/ and generate their binary targets
+TOOL_C_SOURCES := $(wildcard tools/*.c)
+TOOL_TARGETS   := $(TOOL_C_SOURCES:%.c=%)
 
 # If you want to get more details of `dump_stack`, you need to replace `-O3` with `-O0` or '-Os'.
 # `-fno-optimize-sibling-calls` is for `dump_stack` to work properly.
-C_FLAGS    := -Wall -Wextra -O3 -g3 -m64 -fpie -ffreestanding -fno-optimize-sibling-calls -fno-stack-protector -fno-omit-frame-pointer -mstackrealign -mno-red-zone -I include -MMD
-LD_FLAGS   := -nostdlib -pie -T assets/linker.ld -m elf_x86_64
+C_FLAGS        := -Wall -Wextra -Wno-unused-function -O3 -g3 -m64 -fpie -ffreestanding -fno-optimize-sibling-calls -fno-stack-protector -fno-omit-frame-pointer -mstackrealign -mno-red-zone -I include -MMD
+LD_FLAGS       := -nostdlib -pie -T assets/linker.ld -m elf_x86_64
 
 all: Uinxed-x64.iso
 
 %.o: %.c
 	$(Q)printf "  CC      $@\n"
-	$(Q)$(CC) $(C_FLAGS) $(C_CONFIG) -c -o $@ $<
+	$(Q)$(CC) $(C_FLAGS) $(C_CONFIG) -MT $@ -c -o $@ $<
+
+$(INIT_ELF): assets/init.S assets/init.ld
+	$(Q)printf "  AS      assets/init.o\n"
+	$(Q)$(AS) $(ASFLAGS) -o assets/init.o $<
+	$(Q)printf "  LD      $@\n"
+	$(Q)$(LD) -nostdlib -static -T assets/init.ld -m elf_x86_64 -o $@ assets/init.o
+	$(Q)$(RM) assets/init.o
 
 %.fmt: %
 	$(Q)printf "  FORMAT  $<\n"
@@ -103,17 +180,21 @@ all: Uinxed-x64.iso
 	$(Q)clang-tidy $< -- $(C_FLAGS)
 
 info:
-	$(Q)printf "Uinxed-Kernel Compile Script.\n"
-	$(Q)printf "Copyright 2020 ViudiraTech, based on the Apache 2.0 license.\n\n"
+	$(Q)printf "Uinxed Compiling Script - Apache License Version 2.0.\n\n"
 
-UxImage: $(OBJS) $(LIBS)
+tools/%: tools/%.c
+	$(Q)printf "  HOSTCC  $@\n"
+	$(Q)$(HOST_CC) $(HOST_CFLAGS) -o $@ $<
+
+UxImage: $(TOOL_TARGETS) $(OBJS) $(LIBS)
 	$(Q)printf "  LD      $@\n"
-	$(Q)$(LD) $(LD_FLAGS) -o $@ $^
+	$(Q)$(LD) $(LD_FLAGS) -o $@ $(filter-out $(TOOL_TARGETS),$^)
 
-Uinxed-x64.iso: info UxImage
+Uinxed-x64.iso: info UxImage $(INIT_ELF)
 	$(Q)printf "  XORRISO $@\n\n"
 	$(Q)cp -a assets/Limine iso
 	$(Q)cp $(word 2,$^) iso/EFI/Boot
+	$(Q)cp $(INIT_ELF) iso/
 	$(Q)xorriso -as mkisofs -R -r -J -b Limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
                 -hfsplus -apm-block-size 2048 -efi-boot-part --efi-boot-image --protective-msdos-label \
                 --efi-boot Limine/limine-uefi-cd.bin -o $@ iso
@@ -127,8 +208,8 @@ Uinxed-x64.iso: info UxImage
 help: info
 	$(Q)printf "Uinxed-Kernel Makefile Usage:\n"
 	$(Q)printf "  make all         - Build the entire project.\n"
-	$(Q)printf "  make disk.img    - Build a demo simplefs disk image.\n"
 	$(Q)printf "  make run         - Run the Uinxed-x64.iso in QEMU.\n"
+	$(Q)printf "  make disk.img    - Build a demo simplefs disk image.\n"
 	$(Q)printf "  make clean       - Clean all generated files.\n"
 	$(Q)printf "  make format      - Format all source files using clang-format.\n"
 	$(Q)printf "  make check       - Run static code checks using clang-tidy.\n"
@@ -139,19 +220,12 @@ help: info
 run: info Uinxed-x64.iso
 	$(QEMU) $(QEMU_FLAGS) -cdrom $(word 2,$^)
 
-tools/mkfs_simplefs: tools/mkfs_simplefs.c include/simplefs.h include/superblock.h
-	$(Q)printf "  HOSTCC  $@\n"
-	$(Q)mkdir -p tools
-	$(Q)$(HOST_CC) $(HOST_CFLAGS) -o $@ tools/mkfs_simplefs.c
-
-disk.img: tools/mkfs_simplefs
-	$(Q)printf "  MKFS    $@\n"
+disk.img: info tools/mkfs_simplefs
+	$(Q)printf "  MKFS    $@\n\n"
 	$(Q)./tools/mkfs_simplefs $@
 
-diskimg: disk.img
-
 clean: info
-	$(Q)$(RM) $(OBJS) $(DEPS) UxImage Uinxed-x64.iso tools/mkfs_simplefs disk.img
+	$(Q)$(RM) $(OBJS) $(DEPS) UxImage Uinxed-x64.iso tools/mkfs_simplefs disk.img assets/init.o
 	$(Q)printf "Clean completed.\n"
 
 format: info $(C_SOURCES:%=%.fmt) $(C_HEADERS:%=%.fmt)

@@ -10,6 +10,13 @@
 # IntelliJ IDEA
 .idea/
 
+# Vibe Coding shit
+CLAUDE.md
+AGENTS.md
+
+# shit
+nul
+
 # Prerequisites
 *.d
 
@@ -51,6 +58,9 @@
 # Project Objectives
 UxImage
 Uinxed-x64.iso
+init
+init.elf
+mkfs_simplefs
 
 # Clangd
 .clangd

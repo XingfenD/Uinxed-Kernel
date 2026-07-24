@@ -9,11 +9,12 @@
   <img src="https://img.shields.io/badge/Language-C-orange"/>
   <img src="https://img.shields.io/badge/Hardware-x64-green"/>
   <img src="https://img.shields.io/badge/Firmware-UEFI/Legacy-yellow"/>
+  <a href="https://deepwiki.com/ViudiraTech/Uinxed-Kernel"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </div>
 
 ## Overview 💡
 
-Uinxed is a Unix-like operating system kernel developed from scratch, focusing on modern computer architecture and advanced system design concepts. The project aims to build an efficient, stable, and scalable operating system kernel while maintaining code clarity and maintainability.
+Uinxed is a UNIX-like operating system kernel developed from scratch, focusing on modern computer architecture and advanced system design concepts. The project aims to build an efficient, stable, and scalable operating system kernel while maintaining code clarity and maintainability.
 
 ## Core Features 🌟
 
@@ -27,18 +28,51 @@ Uinxed is a Unix-like operating system kernel developed from scratch, focusing o
   - High half memory mapping (HHDM)
 - **Interrupt management**:
   - Complete interrupt descriptor table (IDT) implementation
+  - Exception interrupt handlers for both kernel and userspace
   - Advanced Programmable Interrupt Controller (APIC) support
 - **System management**:
   - ACPI support
   - High Precision Event Timer (HPET)
-  - Multi-core support based on symmetric multi-processing
-- **Terminal meatures**:
+  - Multi-core support based on symmetric multi-processing (SMP)
+  - ALSA-like Audio subsystem
+  - `evdev` for event devices
+  - `DRM` (Direct rendering manager) subsystem
+  - IPC (Inter-Process Communication)
+- **Console meatures**:
   - Bitmap fonts (9x16 pixels)
-  - High-speed terminal implementation
+  - High-speed framebuffer console implementation
 - **Filesystem**:
   - UNIX-like virtual filesystem (VFS)
   - FatFS filesystems (FAT12, FAT16, FAT32)
   - SimpleFS for test
+  - procfs
+- **Scheduler**:
+  - Kernel thread scheduler
+  - Load balance
+  - Preempt scheduling
+  - Multi-processor scheduling
+- **ABI**:
+  - Linux syscalls support
+- **Drivers**:
+  - Audio
+    1. SoundBlaster16
+  - Input
+    1. PS/2 keyboard
+    2. PS/2 mouse
+  - Stoarge
+    1. ATA disk
+  - Bus
+    1. PCI/PCIe
+  - Port
+    1. Standard serial port (RS232)
+    2. Standard parallel port (IEEE 1284)
+  - Security
+    1. Trusted Platform Module (TPM)
+  - Video
+    1. VESA/GOP framebuffer
+- **Userspace**:
+  - `init`
+    1. Load `init` from Limine module.
 
 ## Development Environment Preparation 🛠️
 
@@ -99,10 +133,19 @@ make run
 
 #### Boot in UEFI mode
 
+Direct boot:
+
 1. Convert the USB drive or hard disk to GPT partition table and create ESP partition.
 2. Copy all folders under the project directory ./assets/Limine to the ESP partition.
 3. Copy the compiled kernel (UxImage) to the ./EFI/Boot/ directory in the ESP partition.
 4. Boot from a physical machine (must be in 64-bit UEFI mode with CSM disabled)
+
+Boot with ventoy:
+
+1. Copy the ISO image into your USB drive.
+2. Enter firmware settings and turn off your security boot to make sure ventoy is able to boot.
+3. Boot from your USB drive and select the ISO image.
+4. Kernel boots successfully.
 
 #### Boot in legacy mode
 
@@ -130,6 +173,7 @@ Uinxed-Kernel/
 ├── fs/              # File system.
 ├── include/         # Header file.
 ├── init/            # Code entry.
+├── ipc/             # Inter-process communication.
 ├── kernel/          # Kernel part.
 ├── libs/            # Library file.
 ├── mem/             # Memory management.
@@ -142,7 +186,8 @@ Uinxed-Kernel/
 ├── Kconfig          # Project configuration file.
 ├── LICENSE          # Open source license.
 ├── Makefile         # Build script.
-└── README.md        # Project introduction.
+├── README.md        # Project introduction.
+└── SECURITY.md      # Security policy file.
 ```
 
 ```
@@ -196,20 +241,12 @@ git clone https://github.com/your-username/your-repository.git
 cd your-repository
 ```
 
-### 3.Switch to the develop Branch
-
-- Make sure you're on the develop branch to work on new features and improvements:
-
-```bash
-git checkout develop
-```
-
-### 4.Develop Your Code
+### 3.Develop Your Code
 
 - Start coding! Make the necessary changes or add new features in your develop branch.
 - Be sure to test your code and fix any bugs before proceeding.
 
-### 5.Stage Your Changes
+### 4.Stage Your Changes
 
 - After making your changes, stage them using:
 
@@ -217,7 +254,7 @@ git checkout develop
 git add .
 ```
 
-### 6.Commit Your Changes
+### 5.Commit Your Changes
 
 - Commit your changes with a clear and descriptive message:
 
@@ -225,32 +262,31 @@ git add .
 git commit -m "Describe the changes or features you've implemented."
 ```
 
-### 7.Push Your Changes to the Remote develop Branch
+### 6.Push Your Changes to the Remote Branch
 
-- Push your local develop branch to your remote fork:
+- Push your local branch to your remote fork:
 
 ```bash
-git push origin develop
+git push
 ```
 
-### 8.Create a Pull Request
+### 7.Create a Pull Request
 
 - Visit your GitHub repository and create a Pull Request (PR).
-- Make sure the base branch is set to develop (not master).
 - Fill in the PR description clearly, outlining the changes you've made.
 - Submit the PR for review.
 
-### 9.Code Review and Merging
+### 8.Code Review and Merging
 
 - Wait for the project maintainers to review your code. They may provide feedback or request changes.
 - Once the code is reviewed and approved, it will be merged into the develop branch.
 
-### 10. **Update Your develop Branch**
+### 9. **Update Your Local Branch**
 
-- After your PR is merged, pull the latest changes from develop to keep your local repository up to date:
+- After your PR is merged, pull the latest changes from remote branch to keep your local repository up to date:
 
 ```bash
-git pull origin develop
+git pull --rebase
 ```
 
 ### Important Notes:
@@ -276,11 +312,12 @@ You can submit an issue in your own language. However, please be aware of factor
 
 | Number | Nick name | Github | Job |
 |---|---|---|---|
-| 1 | MicroFish | [FengHeting](https://github.com/FengHeting) | Development. Planning. Management. |
-| 2 | Rainy101112 | [Rainy101112](https://github.com/Rainy101112) | Development. Code optimization. Testing. Bug fixing. |
-| 3 | XSlime | [W9pi3cZ1](https://github.com/W9pi3cZ1) | Features. Code optimization. Testing. Bug fixing. |
-| 4 | suhuajun | [suhuajun-github](https://github.com/suhuajun-github) | Code optimization. Testing. Bug fixing. |
-| 5 | TMX | [TMXQWQ](https://github.com/TMXQWQ) | Features. Code optimization. Testing. Bug fixing. |
+| 1 | Rainy101112 | [Rainy101112](https://github.com/Rainy101112) | Userspace & Services, Code optimization & Testing, Bug fixing, Management |
+| 2 | MicroFish | [FengHeting](https://github.com/FengHeting) | Driver & Low-level, Planning, Code optimization & Testing, Management |
+| 3 | JiTianYu391 | [JiTianYu391](https://github.com/JiTianYu391) | Features, Code optimization & Testing, Bug fixing |
+| 4 | suhuajun | [suhuajun-github](https://github.com/suhuajun-github) | Code optimization & Testing, Bug fixing |
+| 5 | XSlime | [W9pi3cZ1](https://github.com/W9pi3cZ1) | Features, Code optimization & Testing, Bug fixing |
+| 6 | TMX | [TMXQWQ](https://github.com/TMXQWQ) | Features, Code optimization & Testing, Bug fixing |
 
 A resident contributor is someone who directly contributes to and manages the project in a resident capacity. Removing a resident developer from the resident developer list does not mean that the project manager will not recognize their contributions, but rather that they are no longer involved in the project in a resident capacity. However, their contribution record will remain.
 
@@ -295,6 +332,6 @@ This project adopts the Apache 2.0 open source license. Please refer to the LICE
 
 ## Contact Details 📩
 
-- Email：2609948707@qq.com | 3585302907@qq.com
+- Email：rainy101112@163.com | 2609948707@qq.com | 3585302907@qq.com
 - Join our discord server: [Click here](https://discord.gg/nTkg7HCpy7)
 - Tencent QQ chat group: [983673299](https://qm.qq.com/q/8goacFf1iU)

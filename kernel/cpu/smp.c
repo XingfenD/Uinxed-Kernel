@@ -8,25 +8,28 @@
  *
  */
 
-#include <apic.h>
-#include <common.h>
-#include <debug.h>
-#include <eis.h>
-#include <frame.h>
-#include <gdt.h>
-#include <heap.h>
-#include <hhdm.h>
-#include <interrupt.h>
-#include <limine.h>
-#include <page.h>
-#include <printk.h>
-#include <smp.h>
-#include <spin_lock.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <uinxed.h>
+#include <arch/eis.h>
+#include <arch/cpuid.h>
+#include <arch/gdt.h>
+#include <arch/smp.h>
+#include <arch/tss.h>
+#include <boot/limine.h>
+#include <chipset/common.h>
+#include <drivers/apic.h>
+#include <kernel/debug.h>
+#include <kernel/interrupt.h>
+#include <kernel/printk.h>
+#include <kernel/uinxed.h>
+#include <libs/std/stddef.h>
+#include <libs/std/stdint.h>
+#include <libs/std/stdlib.h>
+#include <libs/std/string.h>
+#include <mem/frame.h>
+#include <mem/heap.h>
+#include <mem/hhdm.h>
+#include <mem/page.h>
+#include <proc/sched.h>
+#include <sync/spin_lock.h>
 
 static cpu_processor_t *cpus;
 static size_t           cpu_count = 0;
@@ -39,14 +42,8 @@ INTERRUPT_BEGIN static void ipi_reschedule_handler(interrupt_frame_t *frame)
 {
     (void)frame;
     disable_intr();
-    /* Process scheduler: Currently just re-enable interrupts and return
-     * In a full implementation, this would:
-     * - Switch to next runnable process in the ready queue
-     * - Save current process context (registers, stack pointer)
-     * - Load next process context
-     * - Update process state (running -> ready, ready -> running)
-     */
     send_eoi();
+    sched_ipi_reschedule();
     enable_intr();
 }
 INTERRUPT_END
@@ -115,7 +112,9 @@ void send_ipi_cpu(uint32_t cpu_id, uint8_t vector)
 
 /* Flush TLBs of all CPUs */
 void flush_tlb_all(void)
-{ send_ipi_all(IPI_TLB_SHOOTDOWN); }
+{
+    send_ipi_all(IPI_TLB_SHOOTDOWN);
+}
 
 /* Flushing TLB by address range */
 void flush_tlb_range(uint64_t start, uint64_t end)
@@ -125,7 +124,9 @@ void flush_tlb_range(uint64_t start, uint64_t end)
 
 /* Get the number of CPUs */
 uint32_t get_cpu_count(void)
-{ return cpu_count; }
+{
+    return cpu_count;
+}
 
 /* Get the ID of the current CPU */
 uint32_t get_current_cpu_id(void)
@@ -190,6 +191,7 @@ void ap_entry(struct limine_smp_info *info)
     init_fpu();
     init_sse();
     init_avx();
+    cpu_enable_nx();
 
     /* load page table */
     page_directory_t *krnl_pagedir = get_kernel_pagedir();
@@ -214,16 +216,14 @@ void ap_entry(struct limine_smp_info *info)
     ap_ready_count++;
     spin_unlock(&ap_start_lock);
 
+    sched_ap_online(cpu->id);
+
     /* AP scheduler loop:
-     * - Enable interrupts for timer-based scheduling
+     * - Enable interrupts for timer and reschedule IPI handling
      * - Enter idle loop with HLT instruction
      * - CPU will wake up on interrupts (timer, IPI, etc.)
      */
-    enable_intr();
-    while (1) __asm__ volatile("hlt");
-
-    /* Shouldn't reach here */
-    panic("AP %d scheduler exited.", cpu->id);
+    sched_ap_start(cpu->id);
 }
 
 /* Initializing Symmetric Multi-Processing */

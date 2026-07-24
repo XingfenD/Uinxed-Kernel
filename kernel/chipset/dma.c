@@ -8,8 +8,8 @@
  *
  */
 
-#include <common.h>
-#include <dma.h>
+#include <chipset/common.h>
+#include <chipset/dma.h>
 
 /* Fast access registers and ports for each DMA channel */
 static const uint8_t MASK_REG[8]  = {0x0A, 0x0A, 0x0A, 0x0A, 0xD4, 0xD4, 0xD4, 0xD4};
@@ -66,8 +66,12 @@ void dma_start(uint8_t mode, uint8_t channel, uint32_t *address, uint32_t size)
 
 /* Sending data using DMA */
 void dma_send(uint8_t channel, uint32_t *address, uint32_t size)
-{ dma_start(0x48, channel, address, size); }
+{
+    dma_start(0x48, channel, address, size);
+}
 
 /* Receiving data using DMA */
 void dma_recv(uint8_t channel, uint32_t *address, uint32_t size)
-{ dma_start(0x44, channel, address, size); }
+{
+    dma_start(0x44, channel, address, size);
+}

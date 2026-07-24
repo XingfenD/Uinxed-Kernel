@@ -8,24 +8,46 @@
  *
  */
 
-#include <errno.h>
-#include <heap.h>
-#include <page.h>
-#include <printk.h>
-#include <stdlib.h>
-#include <string.h>
-#include <vfs.h>
+#include <fs/vfs.h>
+#include <kernel/errno.h>
+#include <kernel/printk.h>
+#include <libs/std/stdlib.h>
+#include <libs/std/string.h>
+#include <mem/heap.h>
+#include <mem/page.h>
+#include <proc/process.h>
+
+#define VFS_PATH_MAX 4096
+#define VFS_ACCESS_R 4
+#define VFS_ACCESS_W 2
 
 vfs_node_t rootdir = 0;
 
+/*
+ * Check file access permissions against the current process.
+ * Returns 0 if access is granted, -EACCES otherwise.
+ * Kernel-internal calls (no process context) and root (uid==0) bypass checks.
+ */
+int vfs_access_check(vfs_node_t node, uint32_t access_mask)
+{
+    process_t *proc = process_current();
+    if (!proc || proc->uid == 0) return 0;
+    if (proc->uid == node->owner && (node->mode & (access_mask << 6)) == (access_mask << 6)) return 0;
+    if (proc->gid == node->group && (node->mode & (access_mask << 3)) == (access_mask << 3)) return 0;
+    if ((node->mode & access_mask) == access_mask) return 0;
+    return -EACCES;
+}
+
 struct vfs_callback   vfs_empty_callback;
-static vfs_callback_t fs_callbacks[256] = {[0] = &vfs_empty_callback};
+vfs_callback_t fs_callbacks[256] = {[0] = &vfs_empty_callback};
 static const char    *fs_names[256];
-static int            fs_nextid         = 1;
+static int            fs_nextid = 1;
 
 /* Default callback function (does nothing) */
-static void empty_func(void)
-{ /* Empty Function */ }
+static int empty_func(void)
+{
+    return -ENOSYS;
+}
 
 /* Tokenize the path string, splitting it by '/' */
 static char *pathtok(char **sp)
@@ -90,7 +112,11 @@ static char *vfs_resolve_link_path(vfs_node_t node)
 
     size_t base_len = strlen(base);
     size_t link_len = strlen(node->linkname);
-    path            = malloc(base_len + link_len + 2);
+    if (base_len + link_len + 2 > VFS_PATH_MAX) {
+        free(base);
+        return 0;
+    }
+    path = malloc(base_len + link_len + 2);
     if (!path) {
         free(base);
         return 0;
@@ -136,7 +162,9 @@ static vfs_node_t vfs_child_append(vfs_node_t parent, const char *name, void *ha
 
 /* Find a child node by name within a parent directory */
 static vfs_node_t vfs_child_find(vfs_node_t parent, const char *name)
-{ return clist_first(parent->child, data, streq(name, ((vfs_node_t)data)->name)); }
+{
+    return clist_first(parent->child, data, streq(name, ((vfs_node_t)data)->name));
+}
 
 /* Allocate a new vfs node with the given parent and name */
 vfs_node_t vfs_node_alloc(vfs_node_t parent, const char *name)
@@ -162,7 +190,9 @@ vfs_node_t vfs_node_alloc(vfs_node_t parent, const char *name)
 
 /* Get the root directory node */
 vfs_node_t get_rootdir(void)
-{ return rootdir; }
+{
+    return rootdir;
+}
 
 /* Set the root directory node of the Virtual File System (VFS) */
 void set_rootdir(vfs_node_t node)
@@ -173,11 +203,15 @@ void set_rootdir(vfs_node_t node)
 
 /* Search for a file or directory by name in the specified directory */
 vfs_node_t vfs_do_search(vfs_node_t dir, const char *name)
-{ return clist_first(dir->child, data, streq(name, ((vfs_node_t)data)->name)); }
+{
+    return clist_first(dir->child, data, streq(name, ((vfs_node_t)data)->name));
+}
 
 /* Update a file or directory, ensuring it is open and ready */
 void vfs_update(vfs_node_t node)
-{ do_update(node); }
+{
+    do_update(node);
+}
 
 /* Open a file or directory by path */
 static vfs_node_t vfs_open_internal(const char *str, int symlink_depth)
@@ -209,8 +243,8 @@ static vfs_node_t vfs_open_internal(const char *str, int symlink_depth)
 
         do_update(current);
         if (current->type & file_symlink) {
-            char       *target_path = vfs_resolve_link_path(current);
-            vfs_node_t  target;
+            char      *target_path = vfs_resolve_link_path(current);
+            vfs_node_t target;
 
             if (!target_path) goto err;
             target = vfs_open_internal(target_path, symlink_depth + 1);
@@ -233,7 +267,9 @@ err:
 }
 
 vfs_node_t vfs_open(const char *str)
-{ return vfs_open_internal(str, 0); }
+{
+    return vfs_open_internal(str, 0);
+}
 
 /* Create a new directory at the specified path */
 int vfs_mkdir(const char *name)
@@ -518,23 +554,40 @@ err:
 
 /* Register a vfs callback */
 int vfs_regist(vfs_callback_t callback)
-{ return vfs_regist_fs(0, callback); }
+{
+    return vfs_regist_fs(0, callback);
+}
 
 /* Register a vfs callback with a filesystem name */
 int vfs_regist_fs(const char *name, vfs_callback_t callback)
 {
     if (!callback) return -EINVAL;
-    for (size_t i = 0; i < sizeof(struct vfs_callback) / sizeof(void *); i++) {
-        if (!((void **)callback)[i]) return -EINVAL;
-    }
     if (name) {
         for (int i = 1; i < fs_nextid; i++) {
             if (fs_names[i] && streq(fs_names[i], name)) return -EEXIST;
         }
     }
 
-    int id           = fs_nextid++;
-    fs_callbacks[id] = callback;
+    int id = fs_nextid++;
+    if (id >= 256) {
+        fs_nextid--;
+        return -ENOSPC;
+    }
+
+    /* Allocate and fill a copy of the callback, substituting empty_func for NULL fields */
+    struct vfs_callback *cb_copy = malloc(sizeof(struct vfs_callback));
+    if (!cb_copy) {
+        fs_nextid--;
+        return -ENOMEM;
+    }
+
+    size_t num_fields = sizeof(struct vfs_callback) / sizeof(void *);
+    for (size_t i = 0; i < num_fields; i++) {
+        void *func            = ((void **)callback)[i];
+        ((void **)cb_copy)[i] = func ? func : ((void **)&vfs_empty_callback)[i];
+    }
+
+    fs_callbacks[id] = cb_copy;
     fs_names[id]     = name;
     return id;
 }
@@ -547,7 +600,7 @@ static int vfs_mount_id(const char *src, vfs_node_t node, int fsid)
     if (!node || !(node->type & file_dir)) return -EINVAL;
     if (fsid <= 0 || fsid >= fs_nextid || !fs_callbacks[fsid]) return -ENOENT;
 
-    old_fsid  = node->fsid;
+    old_fsid   = node->fsid;
     node->fsid = fsid;
 
     status = fs_callbacks[fsid]->mount(src, node);
@@ -617,6 +670,7 @@ int vfs_umount(const char *path)
 size_t vfs_read(vfs_node_t file, void *addr, size_t offset, size_t size)
 {
     if (!file || !addr) return (size_t)-1;
+    if (vfs_access_check(file, VFS_ACCESS_R)) return (size_t)-1;
     do_update(file);
 
     if (file->type & file_dir) return (size_t)-1;
@@ -644,6 +698,7 @@ size_t vfs_readlink(vfs_node_t node, char *buf, size_t bufsize)
 size_t vfs_write(vfs_node_t file, void *addr, size_t offset, size_t size)
 {
     if (!file || !addr) return (size_t)-1;
+    if (vfs_access_check(file, VFS_ACCESS_W)) return (size_t)-1;
     do_update(file);
 
     if (file->type & file_dir) return (size_t)-1;

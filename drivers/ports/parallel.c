@@ -8,10 +8,10 @@
  *
  */
 
-#include <common.h>
-#include <parallel.h>
-#include <printk.h>
-#include <timer.h>
+#include <chipset/common.h>
+#include <drivers/parallel.h>
+#include <kernel/printk.h>
+#include <kernel/timer.h>
 
 /* Check if the specified parallel port exists */
 static int parallel_detect(uint16_t port)
@@ -54,7 +54,9 @@ void init_parallel(void)
 
 /* Check if the specified parallel port is busy */
 int parallel_port_busy(uint16_t port)
-{ return !(inb(port + STATUS_REG) & 0x80); }
+{
+    return !(inb(port + STATUS_REG) & 0x80);
+}
 
 /* Write parallel port */
 void write_parallel(uint16_t port, uint8_t data)
@@ -69,4 +71,6 @@ void write_parallel(uint16_t port, uint8_t data)
 
 /* Get the status value of the specified parallel port */
 uint8_t get_parallel_status(uint16_t port)
-{ return inb(port + STATUS_REG); }
+{
+    return inb(port + STATUS_REG);
+}

@@ -8,13 +8,13 @@
  *
  */
 
-#include <acpi.h>
-#include <apic.h>
-#include <hhdm.h>
-#include <limine.h>
-#include <printk.h>
-#include <stdint.h>
-#include <uinxed.h>
+#include <boot/limine.h>
+#include <drivers/acpi.h>
+#include <drivers/apic.h>
+#include <kernel/printk.h>
+#include <kernel/uinxed.h>
+#include <libs/std/stdint.h>
+#include <mem/hhdm.h>
 
 xsdt_t *xsdt = 0;
 rsdt_t *rsdt = 0;
@@ -54,11 +54,11 @@ void *find_table(const char *name)
 /* Initialize ACPI */
 void acpi_init(void)
 {
-    rsdp_t *rsdp = (rsdp_t *)rsdp_request.response->address;
-    if (!rsdp) {
+    if (!rsdp_request.response || !rsdp_request.response->address) {
         plogk("acpi: RSDP not found.\n");
         return;
     }
+    rsdp_t *rsdp = (rsdp_t *)rsdp_request.response->address;
     plogk("acpi: Version %s\n", rsdp->revision ? "2.0+" : "1.0");
     plogk("acpi: RSDP found at %p\n", rsdp);
 
@@ -83,4 +83,6 @@ void acpi_init(void)
     load_table(APIC, apic_init);
     load_table(FACP, facp_init);
     load_table(MCFG, mcfg_init);
+
+    acpi_event_init();
 }

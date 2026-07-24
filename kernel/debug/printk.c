@@ -8,17 +8,17 @@
  *
  */
 
-#include <printk.h>
-#include <spin_lock.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <tty.h>
+#include <drivers/tty.h>
+#include <kernel/printk.h>
+#include <libs/std/stdarg.h>
+#include <libs/std/stddef.h>
+#include <libs/std/stdint.h>
+#include <libs/std/stdlib.h>
+#include <libs/std/string.h>
+#include <sync/spin_lock.h>
 
 #ifdef KERNEL_LOG
-#    include <acpi.h>
+#    include <drivers/acpi.h>
 #endif
 
 #define BUF_SIZE 2048 // least 2 bytes (1 byte is for '\0')
@@ -89,8 +89,8 @@ int sprintf(char *str, const char *fmt, ...)
     int             c                 = 0;
     unsafe_buf_data unsafe_buf_data   = {.buf = str, .idx = 0};
     writer          unsafe_buf_writer = {
-        .data    = &unsafe_buf_data,
-        .handler = unsafe_buf_write,
+                 .data    = &unsafe_buf_data,
+                 .handler = unsafe_buf_write,
     };
     va_list arg;
     va_start(arg, fmt);
@@ -108,8 +108,8 @@ int snprintf(char *str, size_t size, const char *fmt, ...)
     int             c                 = 0;
     unsafe_buf_data unsafe_buf_data   = {.buf = str, .idx = 0, .size = size};
     writer          unsafe_buf_writer = {
-        .data    = &unsafe_buf_data,
-        .handler = unsafe_buf_write_safe,
+                 .data    = &unsafe_buf_data,
+                 .handler = unsafe_buf_write_safe,
     };
     va_list arg;
     va_start(arg, fmt);
@@ -130,8 +130,8 @@ int vsprintf(char *str, const char *fmt, va_list args)
     int             c                 = 0;
     unsafe_buf_data unsafe_buf_data   = {.buf = str, .idx = 0};
     writer          unsafe_buf_writer = {
-        .data    = &unsafe_buf_data,
-        .handler = unsafe_buf_write,
+                 .data    = &unsafe_buf_data,
+                 .handler = unsafe_buf_write,
     };
     c = (int)vwprintf(&unsafe_buf_writer, fmt, args);
     unsafe_buf_writer.handler(&unsafe_buf_writer, '\0');
@@ -144,8 +144,8 @@ int vsnprintf(char *str, size_t size, const char *fmt, va_list args)
     int             c                 = 0;
     unsafe_buf_data unsafe_buf_data   = {.buf = str, .idx = 0, .size = size};
     writer          unsafe_buf_writer = {
-        .data    = &unsafe_buf_data,
-        .handler = unsafe_buf_write_safe,
+                 .data    = &unsafe_buf_data,
+                 .handler = unsafe_buf_write_safe,
     };
     c = (int)vwprintf(&unsafe_buf_writer, fmt, args);
     if (size > 0) {

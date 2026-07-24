@@ -8,17 +8,23 @@
  *
  */
 
-#include <common.h>
-#include <errno.h>
-#include <fbdev.h>
-#include <fbcon.h>
-#include <gfx_proc.h>
-#include <limine.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <uinxed.h>
-#include <video.h>
+#include <boot/limine.h>
+#include <chipset/common.h>
+#include <kernel/errno.h>
+#include <kernel/printk.h>
+#include <kernel/uinxed.h>
+#include <libs/gfxs/gfx_proc.h>
+#include <libs/std/stddef.h>
+#include <libs/std/stdint.h>
+#include <libs/std/string.h>
+#include <proc/uaccess.h>
+#include <video/fbcon.h>
+#include <video/fbdev.h>
+#include <video/klogo.h>
+#include <video/video.h>
+
+/* DRM-flush callback — set by video_switch_to_drm, invoked after draws */
+static video_flush_fn_t video_flush_cb = NULL;
 
 uint64_t  width;  // Screen width
 uint64_t  height; // Screen height
@@ -68,7 +74,9 @@ video_info_t video_get_info(void)
 
 /* Get the frame buffer */
 struct limine_framebuffer *get_framebuffer(void)
-{ return framebuffer_request.response->framebuffers[0]; }
+{
+    return framebuffer_request.response->framebuffers[0];
+}
 
 /* Read raw bytes from the primary framebuffer */
 size_t video_fb_read(void *ctx, void *addr, size_t offset, size_t size)
@@ -112,10 +120,11 @@ int video_fb_ioctl(void *ctx, size_t req, void *arg)
     video_info_t info;
 
     (void)ctx;
-    if (req != FBDEV_IOCTL_GET_INFO || !arg) return -EINVAL;
+    if (req != FBDEV_IOCTL_GET_INFO) return -EINVAL;
+    if (!arg) return -EFAULT;
 
-    info = video_get_info();
-    *(fbdev_info_t *)arg = (fbdev_info_t) {
+    info                 = video_get_info();
+    fbdev_info_t fb_info = {
         .width            = info.width,
         .height           = info.height,
         .stride           = info.stride,
@@ -128,6 +137,7 @@ int video_fb_ioctl(void *ctx, size_t req, void *arg)
         .blue_mask_size   = info.blue_mask_size,
         .blue_mask_shift  = info.blue_mask_shift,
     };
+    if (copy_to_user(arg, &fb_info, sizeof(fb_info))) return -EFAULT;
     return EOK;
 }
 
@@ -151,6 +161,7 @@ void video_clear(void)
     back_color = color_to_fb_color((color_t) {0x00, 0x00, 0x00});
     for (uint32_t i = 0; i < (stride * height); i++) buffer[i] = back_color;
     cx = cy = 0;
+    if (video_flush_cb) video_flush_cb();
 }
 
 /* Clear screen with color */
@@ -163,11 +174,15 @@ void video_clear_color(uint32_t color)
 
 /* Draw a pixel at the specified coordinates on the screen */
 void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color)
-{ (buffer)[y * stride + x] = color; }
+{
+    (buffer)[y * stride + x] = color;
+}
 
 /* Get a pixel at the specified coordinates on the screen */
 uint32_t video_get_pixel(uint32_t x, uint32_t y)
-{ return (buffer)[y * stride + x]; }
+{
+    return (buffer)[y * stride + x];
+}
 
 /* Iterate over a area on the screen and run a callback function in each iteration */
 void video_invoke_area(position_t p0, position_t p1, void (*callback)(position_t p))
@@ -194,4 +209,36 @@ void video_draw_rect(position_t p0, position_t p1, uint32_t color)
         for (uint32_t x = x0; x <= x1; x++) video_draw_pixel(x, y, color);
 #endif
     }
+    if (video_flush_cb) video_flush_cb();
+}
+
+/*
+ * video_switch_to_drm — redirect fbcon output to a DRM GEM backing buffer.
+ *
+ * After this call all printk / tty output renders into the DRM buffer
+ * instead of the boot-time Limine framebuffer.  The @flush callback is
+ * invoked after each batch draw to push pixels to the host GPU.
+ */
+void video_switch_to_drm(void *backing, uint32_t w, uint32_t h, uint32_t pitch, video_flush_fn_t flush)
+{
+    if (!backing || !flush) return;
+
+    buffer = (uint32_t *)backing;
+    width  = w;
+    height = h;
+    stride = pitch / sizeof(uint32_t); /* pixels per line */
+
+    video_flush_cb = flush;
+
+    /* Rebuild the fbcon character grid for the new resolution */
+    fbcon_resize();
+
+    /* Clear to black and flush, then redraw the boot logo and flush */
+    video_clear();
+#if BOOT_LOGO
+    video_redraw_logo();
+    if (video_flush_cb) video_flush_cb(); /* flush logo pixels to host */
+#endif
+
+    plogk("video: switched console to DRM framebuffer %ux%u stride=%u\n", w, h, (uint32_t)stride);
 }

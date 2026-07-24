@@ -8,10 +8,10 @@
  *
  */
 
-#include <common.h>
-#include <cpuid.h>
-#include <printk.h>
-#include <tsc.h>
+#include <arch/cpuid.h>
+#include <chipset/common.h>
+#include <drivers/tsc.h>
+#include <kernel/printk.h>
 
 static uint64_t tsc_frequency  = 0;
 static uint64_t tsc_boot_value = 0;
@@ -74,7 +74,9 @@ uint64_t tsc_calibrate_with_hpet(hpet_info_t *hpet_addr)
 
 /* Get CPU frequency (Hz) */
 uint64_t tsc_get_cpu_frequency(void)
-{ return tsc_frequency; }
+{
+    return tsc_frequency;
+}
 
 /* Returns the TSC nanosecond value of the current time */
 uint64_t tsc_nano_time(void)

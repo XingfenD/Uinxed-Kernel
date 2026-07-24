@@ -8,13 +8,15 @@
  *
  */
 
-#include <bitmap.h>
-#include <frame.h>
-#include <hhdm.h>
-#include <limine.h>
-#include <page.h>
-#include <printk.h>
-#include <uinxed.h>
+#include <boot/limine.h>
+#include <chipset/common.h>
+#include <kernel/printk.h>
+#include <kernel/uinxed.h>
+#include <libs/std/stdlib.h>
+#include <mem/bitmap.h>
+#include <mem/frame.h>
+#include <mem/hhdm.h>
+#include <mem/page.h>
 
 log_buffer_t      frame_log;
 frame_allocator_t frame_allocator;
@@ -24,23 +26,29 @@ uint64_t          memory_size = 0;
 void init_frame(void)
 {
     struct limine_memmap_response *memory_map = memmap_request.response;
-    for (uint64_t i = memory_map->entry_count; i-- > 0;) {
+    if (!memory_map) krn_halt();
+
+    for (uint64_t i = 0; i < memory_map->entry_count; i++) {
         struct limine_memmap_entry *region = memory_map->entries[i];
         if (region->type == LIMINE_MEMMAP_USABLE) {
-            memory_size = region->base + region->length;
-            log_buffer_write(&frame_log, "frame: Found usable region at %p (size: %llu KiB)\n", region->base, region->length / 1024);
-            break;
+            uint64_t region_end = region->base + region->length;
+            if (region_end > memory_size) memory_size = region_end;
         }
     }
-    size_t   bitmap_size    = (memory_size / PAGE_4K_SIZE + 7) / 8;
+    log_buffer_write(&frame_log, "frame: Highest usable address is %p\n", memory_size);
+    size_t   bitmap_size    = ALIGN_UP((memory_size / PAGE_4K_SIZE + 7) / 8, PAGE_4K_SIZE);
     uint64_t bitmap_address = 0;
 
     for (uint64_t i = 0; i < memory_map->entry_count; i++) {
         struct limine_memmap_entry *region = memory_map->entries[i];
-        if (region->type == LIMINE_MEMMAP_USABLE && region->length >= bitmap_size) {
-            bitmap_address = region->base;
-            break;
-        }
+        if (region->type != LIMINE_MEMMAP_USABLE) continue;
+
+        uint64_t region_start = ALIGN_UP(MAX(region->base, 0x100000ULL), PAGE_4K_SIZE);
+        uint64_t region_end   = ALIGN_DOWN(region->base + region->length, PAGE_4K_SIZE);
+        if (region_start >= region_end || region_end - region_start < bitmap_size) continue;
+
+        bitmap_address = ALIGN_DOWN(region_end - bitmap_size, PAGE_4K_SIZE);
+        break;
     }
     if (bitmap_address) {
         log_buffer_write(&frame_log, "frame: Bitmap allocated at %p (size: %llu KiB)\n", bitmap_address, bitmap_size / 1024);
@@ -50,7 +58,6 @@ void init_frame(void)
     }
     bitmap_t *bitmap = &frame_allocator.bitmap;
     bitmap_init(bitmap, phys_to_virt(bitmap_address), bitmap_size);
-    bitmap_fill(bitmap, 0);
     size_t origin_frames = 0;
 
     for (uint64_t i = 0; i < memory_map->entry_count; i++) {
@@ -134,6 +141,7 @@ void free_frame(uint64_t addr)
 
     if (!frame_index) return;
     bitmap_t *bitmap = &frame_allocator.bitmap;
+    if (bitmap_get(bitmap, frame_index)) return;
     bitmap_set(bitmap, frame_index, 1);
     frame_allocator.usable_frames++;
 }
@@ -146,6 +154,7 @@ void free_frames(uint64_t addr, size_t count)
 
     if (!frame_index) return;
     bitmap_t *bitmap = &frame_allocator.bitmap;
+    if (bitmap_range_all(bitmap, frame_index, frame_index + count, 1)) return;
     bitmap_set_range(bitmap, frame_index, frame_index + count, 1);
     frame_allocator.usable_frames += count;
 }
@@ -158,6 +167,7 @@ void free_frames_2M(uint64_t addr)
 
     if (!frame_index) return;
     bitmap_t *bitmap = &frame_allocator.bitmap;
+    if (bitmap_range_all(bitmap, frame_index, frame_index + 512, 1)) return;
     for (size_t i = 0; i < 512; i++) bitmap_set(bitmap, frame_index + i, 1);
     frame_allocator.usable_frames += 512;
 }
@@ -170,6 +180,7 @@ void free_frames_1G(uint64_t addr)
 
     if (!frame_index) return;
     bitmap_t *bitmap = &frame_allocator.bitmap;
+    if (bitmap_range_all(bitmap, frame_index, frame_index + 262144, 1)) return;
     for (size_t i = 0; i < 262144; i++) bitmap_set(bitmap, frame_index + i, 1);
     frame_allocator.usable_frames += 262144;
 }

@@ -2,14 +2,13 @@
 /* Low level disk I/O module for FatFs over blockdev                     */
 /*-----------------------------------------------------------------------*/
 
-#include <blockdev.h>
-#include <errno.h>
-#include <fatfs_disk.h>
-#include <printk.h>
-#include <string.h>
-
-#include "ff.h"
-#include "ffdiskio.h"
+#include <drivers/blockdev.h>
+#include <fs/fatfs/fatfs_disk.h>
+#include <fs/fatfs/ff.h>
+#include <fs/fatfs/ffdiskio.h>
+#include <kernel/errno.h>
+#include <kernel/printk.h>
+#include <libs/std/string.h>
 
 static blockdev_device_t fatfs_devices[FF_VOLUMES];
 static BYTE              fatfs_ready[FF_VOLUMES];
@@ -37,7 +36,7 @@ static DRESULT fatfs_open_drive(BYTE pdrv)
 {
     if (pdrv >= FF_VOLUMES) return RES_PARERR;
     if (fatfs_bound[pdrv]) return RES_OK;
-    if (blockdev_open_ide(pdrv, &fatfs_devices[pdrv]) != EOK) return RES_NOTRDY;
+    if (blockdev_open_drive(pdrv, &fatfs_devices[pdrv]) != EOK) return RES_NOTRDY;
 
     fatfs_ready[pdrv] = 1;
     return RES_OK;

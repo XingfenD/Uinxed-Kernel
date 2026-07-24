@@ -8,7 +8,7 @@
  *
  */
 
-#include <math.h>
+#include <libs/std/math.h>
 
 /* Round a floating-point number to the nearest integer */
 int round(float64_t x)
@@ -208,4 +208,6 @@ double ldexp(double x, int exp)
 
 /* Return the absolute value of an integer */
 int abs(int x)
-{ return (x < 0 ? -x : x); }
+{
+    return (x < 0 ? -x : x);
+}

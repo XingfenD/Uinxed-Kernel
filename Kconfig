@@ -1,23 +1,23 @@
-mainmenu "Uinxed-Kernel"
+mainmenu "Uinxed"
 
 menu "Kernel debugging"
 
   config KERNEL_LOG
-    bool "Kernel runtime logging output"
+    bool "Kernel debug logging output"
     default y
     help
-      "Outputs kernel log messages during system runtime to aid the monitoring and debugging."
+      "Outputs kernel debug messages when running."
 
-endmenu
-
-menu "Terminal properties"
-
-  # TTF font support has been removed. Using bitmap fonts only.
+  config SCHED_DEBUG_DEMO
+    bool "Scheduler debug demo threads"
+    default n
+    help
+      "Creates kernel threads that exercise preemption, sleep, wait queues, SMP placement, migration, and balancing."
 
 endmenu
 
 menu "Processor configuration"
-  menu "Symmetric multi-processing"
+  menu "SMP (Symmetric multi-processing)"
 
     config CPU_MAX_COUNT
       int "Maximum number of CPUs"
@@ -52,8 +52,8 @@ menu "Processor configuration"
 endmenu
 
 menu "Device drivers"
-  menu "Character drivers"
-    menu "Teletype drivers"
+  menu "Character devices"
+    menu "Teletype devices"
 
       config TTY_DEFAULT_DEV
         string "Default teletype device"
@@ -69,7 +69,7 @@ menu "Device drivers"
           "Buffer size for temporarily storing input and output data in the teletype driver."
 
     endmenu
-    menu "Serial port drivers"
+    menu "Serial port devices"
 
       config SERIAL_BAUD_RATE
         int "Serial port baud rate"
@@ -93,5 +93,105 @@ menu "Device drivers"
           "Number of stop bits per character for the serial port device."
 
     endmenu
+  endmenu
+  menu "Input device support"
+
+    config INPUT_EVDEV
+      bool "Event interface (evdev)"
+      default y
+      help
+        "Enable the Linux-compatible evdev input event subsystem, providing
+        /dev/input/eventX character devices for input event delivery."
+
+    config INPUT_EVDEV_BUFSIZE
+      int "evdev buffer size (power of 2)"
+      default 256
+      depends on INPUT_EVDEV
+      range 64 4096
+      help
+        "Size of the per-client event ring buffer, must be a power of 2."
+
+  endmenu
+  menu "Graphics support"
+
+    config DRM
+      bool "Direct Rendering Manager (DRM)"
+      default y
+      help
+        "Enable the Direct Rendering Manager (DRM) subsystem,
+        providing /dev/dri/card0 for GPU device access and KMS
+        (Kernel Mode Setting) support."
+
+    config BOOT_LOGO
+      bool "Boot logo"
+      default y
+      help
+        "Displays CPU logos in the top area of the screen during kernel startup,
+        The number of logos is automatically adjusted according to the detected CPU count."
+
+  endmenu
+
+  menu "Filesystem support"
+
+    config SYSFS
+      bool "sysfs filesystem support"
+      default y
+      help
+        "Enable the sysfs virtual filesystem, providing a structured view
+        of kernel objects, devices, buses, drivers, and classes to userspace.
+        sysfs is mounted at /sys and is the foundation of the Linux device model.
+        This option also enables the kobject/kset infrastructure."
+
+    config NETLINK
+      bool "Netlink socket support"
+      default y
+      help
+        "Enable AF_NETLINK socket family for kernel-userspace communication.
+        Netlink is used for uevent delivery (udev), routing, and other
+        kernel services. Required for hotplug and device manager support."
+
+    config UEVENT_HELPER
+      bool "uevent helper (hotplug event delivery)"
+      depends on NETLINK && SYSFS
+      default y
+      help
+        "Broadcast kernel object events (add/remove/change/move) to
+        userspace via netlink KOBJECT_UEVENT protocol. This enables
+        udev or mdev to react to device hotplug events."
+
+  endmenu
+
+  menu "Sound card support"
+
+    config SOUND_HDA
+      bool "Intel HD Audio (HDA) driver"
+      default y
+      help
+        "Enable the Intel High Definition Audio driver. This provides
+        basic audio playback for Intel HDA-compatible audio controllers
+        found on most modern x86 systems."
+
+  endmenu
+
+  menu "VirtIO drivers"
+
+    config VIRTIO
+      bool "VirtIO PCI transport layer"
+      default y
+      help
+        "Enable the VirtIO PCI transport layer, providing generic
+        MMIO-based capability discovery and virtqueue management
+        for all virtio device drivers."
+
+    config VIRTIO_GPU
+      bool "VirtIO GPU DRM driver"
+      depends on DRM && VIRTIO
+      default y
+      help
+        "Enable the VirtIO-GPU DRM driver for paravirtualised GPU
+        devices (PCI vendor 0x1af4, device 0x1050).  Provides KMS
+        display pipeline, render node (/dev/dri/renderD*), and
+        optional 3D acceleration via the virgl context protocol."
+
   endmenu
 endmenu

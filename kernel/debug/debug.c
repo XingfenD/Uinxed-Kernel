@@ -8,14 +8,18 @@
  *
  */
 
-#include <common.h>
-#include <debug.h>
-#include <limine.h>
-#include <printk.h>
-#include <smbios.h>
-#include <stdarg.h>
-#include <symbols.h>
-#include <uinxed.h>
+#include <arch/smp.h>
+#include <boot/limine.h>
+#include <chipset/common.h>
+#include <chipset/smbios.h>
+#include <drivers/tty.h>
+#include <kernel/debug.h>
+#include <kernel/printk.h>
+#include <kernel/symbols.h>
+#include <kernel/uinxed.h>
+#include <libs/std/stdarg.h>
+#include <proc/sched.h>
+#include <proc/task.h>
 
 int carry_error_code = 0;
 
@@ -27,32 +31,44 @@ void dump_stack(void)
     union rbp_node {
             uintptr_t       inner;
             union rbp_node *next;
-    } *rbp; // A way to avoid performance-no-int-to-ptr
+    } *rbp;
 
     uintptr_t rip;
     __asm__ volatile("movq %%rbp, %0" : "=r"(rbp));
-    __asm__ volatile("leaq (%%rip), %0" : "=r"(rip));
 
     plogk("Call Trace:\n");
     plogk(" <TASK>\n");
 
     int frame_count = 0;
-    for (int i = 0; i < 16 && rip && (uintptr_t)rbp > 0x1000; ++i) {
+    for (int i = 0; i < 16; ++i) {
         if (carry_error_code && frame_count == 3) {
+            if ((uintptr_t)(rbp + 1) <= 0x1000) break;
             rip = *(uintptr_t *)(rbp + 1);
+            if ((uintptr_t)rbp->next <= 0x1000) break;
             rbp = rbp->next;
             ++frame_count;
             continue;
         }
 
-        sym_info_t sym_info = get_symbol_info(kernel_file_request.response->kernel_file->address, rip);
-        if (!sym_info.name) {
-            plogk("  [<0x%016zx>] %s\n", rip, "unknown");
-        } else {
-            plogk("  [<0x%016zx>] `%s`+0x%lx/0x%lx\n", rip, sym_info.name, rip - current_address, sym_info.size);
-        }
+        if ((uintptr_t)rbp <= 0x1000) break;
+        if ((uintptr_t)(rbp + 1) <= 0x1000) break;
 
         rip = *(uintptr_t *)(rbp + 1);
+        if (!rip) break;
+
+        if (rip >= KERNEL_BASE_ADDRESS) {
+            sym_info_t sym_info = get_symbol_info(kernel_file_request.response->kernel_file->address, rip);
+            if (sym_info.name) {
+                plogk("  [<0x%016zx>] `%s`+0x%lx/0x%lx\n", rip, sym_info.name, rip - current_address, sym_info.size);
+            } else {
+                plogk("  [<0x%016zx>] %s\n", rip, "unknown");
+            }
+        } else {
+            plogk("  [<0x%016zx>] %s\n", rip, "unknown");
+            break;
+        }
+
+        if ((uintptr_t)rbp->next <= 0x1000) break;
         rbp = rbp->next;
         ++frame_count;
     }
@@ -80,10 +96,15 @@ void panic(const char *format, ...)
 
     plogk("\n");
     plogk("Kernel panic - not syncing: %s\n", buff);
+    task_t     *panic_task = current_task();
+    int         panic_pid  = panic_task ? (int)panic_task->pid : -1;
+    const char *panic_comm = panic_task ? panic_task->name : "<none>";
+    plogk("CPU: %d PID: %d Comm: %s Not tainted\n", get_current_cpu_id(), panic_pid, panic_comm);
     plogk("Hardware name: %s %s, BIOS %s %s\n", sys_vendor, sys_product, bios_version, bios_date);
     dump_stack();
     plogk("Kernel Offset: 0x%08x from %p\n", current_address - KERNEL_BASE_ADDRESS, KERNEL_BASE_ADDRESS);
-    plogk("---[ end Kernel panic - not syncing: %s ]---\n", buff);
+    plogk("---[ end Kernel panic - not syncing: %s ]---", buff);
+    tty_buff_flush();
     krn_halt();
 }
 
@@ -91,5 +112,6 @@ void panic(const char *format, ...)
 void assertion_failure(const char *exp, const char *file, int line)
 {
     printk("assert(%s) failed!\nfile: %s\nline: %d\n\n", exp, file, line);
+    tty_buff_flush();
     krn_halt();
 }

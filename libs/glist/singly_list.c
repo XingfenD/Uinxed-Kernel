@@ -8,8 +8,8 @@
  *
  */
 
-#include <heap.h>
-#include <singly_list.h>
+#include <libs/glist/singly_list.h>
+#include <mem/heap.h>
 
 /* Initialize a singly linked list */
 int slist_init(slist_t *list)
@@ -123,4 +123,23 @@ int slist_destroy(slist_t *list, void (*free_data)(void *))
     list->tail = 0;
     list->size = 0;
     return 0;
+}
+
+/* Remove a specific node by data pointer from a singly linked list */
+int slist_remove(slist_t *list, void *data)
+{
+    if (!list || !data) return 1;
+    slist_node_t **cur = &list->head;
+    while (*cur) {
+        if ((*cur)->data == data) {
+            slist_node_t *node = *cur;
+            *cur               = node->next;
+            if (list->tail == node) list->tail = 0;
+            free(node);
+            list->size--;
+            return 0;
+        }
+        cur = &(*cur)->next;
+    }
+    return 1;
 }
